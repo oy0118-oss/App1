@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>共同基金 | 工業風 PWA v2.9</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+
+        :root {
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --accent-blue: #4A90E2;
+            --accent-green: #50E3C2;
+            --accent-red: #FF5E5E;
+        }
+
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background: radial-gradient(circle at 50% 0%, #1a202c, #000000);
+            color: #E2E8F0;
+            min-height: 100vh;
+            margin: 0;
+            padding-bottom: 80px;
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 28px;
+        }
+
+        .industrial-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            color: #fff;
+            padding: 10px 14px;
+            width: 100%;
+            outline: none;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .industrial-input:focus { border-color: var(--accent-blue); background: rgba(0, 0, 0, 0.5); }
+
+        .toggle-btn {
+            padding: 6px 14px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: bold;
+            transition: 0.3s;
+            border: 1px solid var(--glass-border);
+            background: rgba(255,255,255,0.05);
+            color: rgba(255,255,255,0.4);
+        }
+
+        .toggle-btn.active {
+            background: var(--accent-blue);
+            color: white;
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 15px rgba(74, 144, 226, 0.3);
+        }
+
+        .calendar-day {
+            aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+            border-radius: 12px; font-size: 13px; cursor: pointer; position: relative;
+        }
+        .calendar-day.selected { background: var(--accent-blue) !important; color: white; }
+        .calendar-day.has-data::after {
+            content: ''; position: absolute; bottom: 6px; width: 4px; height: 4px; background: var(--accent-red); border-radius: 50%;
+        }
+
+        .statement-row { border-bottom: 1px solid rgba(255,255,255,0.05); padding: 12px 0; }
+        .statement-row:last-child { border: none; }
+
+        ::-webkit-scrollbar { display: none; }
+        select { color-scheme: dark; }
+    </style>
+</head>
+<body class="p-4 flex flex-col items-center">
+
+    <div class="w-full max-w-md space-y-6">
+        <!-- 頂部資訊 -->
+        <div class="flex justify-between items-end px-2">
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight text-white">共同基金</h1>
+                <p class="text-[10px] opacity-40 uppercase tracking-widest">Industrial Ledger v2.9</p>
+            </div>
+            <div class="text-right">
+                <p class="text-xs opacity-50">帳戶總結餘</p>
+                <p id="totalBalance" class="text-xl font-bold text-blue-400">$ 0</p>
+            </div>
+        </div>
+
+        <!-- 數據分析區域 -->
+        <div class="glass-card p-5 space-y-5">
+            <div class="grid grid-cols-2 gap-3">
+                <select id="filterPeriod" class="industrial-input" onchange="renderAll()">
+                    <option value="today">📅 本日數據</option>
+                    <option value="week">📅 本週數據</option>
+                    <option value="month">📅 本月數據</option>
+                    <option value="all" selected>📅 全部數據</option>
+                </select>
+                <select id="filterUser" class="industrial-input" onchange="renderAll()">
+                    <option value="all">👥 檢視所有人</option>
+                    <option value="小明">👤 檢視小明</option>
+                    <option value="小華">👤 檢視小華</option>
+                </select>
+            </div>
+
+            <div class="flex justify-between items-center px-1">
+                <div class="flex gap-1 bg-black/30 p-1 rounded-full">
+                    <button onclick="setChartScope('personal')" id="btnScopePers" class="toggle-btn active">個人份額</button>
+                    <button onclick="setChartScope('joint')" id="btnScopeJoint" class="toggle-btn">共同總額</button>
+                </div>
+                <div class="flex gap-1 bg-black/30 p-1 rounded-full">
+                    <button onclick="setChartType('expense')" id="btnTypeExp" class="toggle-btn active">支出</button>
+                    <button onclick="setChartType('income')" id="btnTypeInc" class="toggle-btn">進帳</button>
+                </div>
+            </div>
+            
+            <div class="h-60 relative flex flex-col items-center justify-center">
+                <div class="absolute flex flex-col items-center pointer-events-none text-center">
+                    <span id="chartLabel" class="text-[10px] opacity-40 uppercase">支出分析</span>
+                    <span id="chartCenterTotal" class="text-xl font-bold text-white">--</span>
+                    <span id="jointShareHint" class="text-[10px] text-blue-300 mt-1 bg-blue-500/10 px-2 py-0.5 rounded-full hidden">人均: $0</span>
+                </div>
+                <canvas id="mainChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 收支明細彙總報表 -->
+        <div class="glass-card p-6 space-y-4">
+            <h3 class="text-sm font-bold flex items-center">
+                <span class="w-1.5 h-4 bg-green-500 rounded-full mr-2"></span>收支彙整報表
+            </h3>
+            <div id="statementContent" class="text-xs space-y-1"></div>
+            <div class="pt-4 border-t border-white/10 flex justify-between items-center">
+                <div class="flex flex-col">
+                    <span class="text-[10px] opacity-40">所選期間結餘</span>
+                    <span class="text-[8px] opacity-20">包含分攤計算</span>
+                </div>
+                <span id="statementNet" class="font-bold text-lg">--</span>
+            </div>
+        </div>
+
+        <!-- 月曆 -->
+        <div class="glass-card p-5">
+            <div class="flex justify-between items-center mb-4 px-1 text-sm font-bold">
+                <h3 id="calendarTitle">2024年 4月</h3>
+                <div class="flex gap-4 text-blue-400">
+                    <button onclick="changeMonth(-1)" class="p-1">◀</button>
+                    <button onclick="changeMonth(1)" class="p-1">▶</button>
+                </div>
+            </div>
+            <div id="calendarGrid" class="grid grid-cols-7 gap-1 text-center"></div>
+        </div>
+
+        <!-- 輸入表單 -->
+        <div class="glass-card p-6 space-y-4" id="formAnchor">
+            <div class="flex justify-between items-center">
+                <h3 id="formTitle" class="font-bold text-lg text-white/90">新增交易</h3>
+                <span id="editIndicator" class="hidden text-[10px] bg-blue-500/20 text-blue-400 px-2 py-1 rounded-full border border-blue-500/30">模式：編輯紀錄</span>
+            </div>
+            
+            <div class="space-y-4">
+                <div class="flex gap-2">
+                    <select id="inputUser" class="industrial-input flex-1">
+                        <option value="小明">👤 紀錄人：小明</option>
+                        <option value="小華">👤 紀錄人：小華</option>
+                    </select>
+                    <select id="inputType" class="industrial-input flex-1" onchange="toggleFormUI()">
+                        <option value="expense">支出項目</option>
+                        <option value="income">進帳項目</option>
+                    </select>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-2">
+                    <select id="inputCategory" class="industrial-input">
+                        <!-- 分類會根據支出/進帳動態切換 -->
+                    </select>
+                    <input type="text" id="inputTitle" class="industrial-input" placeholder="手打品項名稱">
+                </div>
+
+                <div class="relative">
+                    <span class="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-bold text-white/20">$</span>
+                    <input type="number" id="inputAmount" class="industrial-input text-3xl font-bold pl-10" placeholder="0" inputmode="decimal">
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <input type="date" id="inputDate" class="industrial-input text-xs">
+                    <input type="time" id="inputTime" class="industrial-input text-xs">
+                </div>
+
+                <!-- 分攤邏輯 -->
+                <div id="jointGroup" class="p-4 bg-black/20 rounded-2xl border border-white/5 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-medium">共同分攤 (依成員平分)</span>
+                        <input type="checkbox" id="isJoint" class="w-5 h-5 accent-blue-500" onchange="updateSplitUI()">
+                    </div>
+                    <div id="splitUI" class="hidden space-y-3">
+                        <div class="flex gap-2" id="splitTags">
+                            <div class="px-4 py-2 border border-white/10 rounded-full text-[11px] cursor-pointer bg-white/5" onclick="toggleSplit('小明', this)">小明</div>
+                            <div class="px-4 py-2 border border-white/10 rounded-full text-[11px] cursor-pointer bg-white/5" onclick="toggleSplit('小華', this)">小華</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-2">
+                    <button id="cancelEditBtn" onclick="cancelEdit()" class="hidden flex-1 rounded-btn py-4 bg-white/5 text-white/50 text-sm border border-white/10">取消</button>
+                    <button id="saveBtn" onclick="saveRecord()" class="flex-[2] rounded-btn py-4 bg-gradient-to-br from-blue-600 to-blue-400 text-white shadow-xl shadow-blue-500/20">
+                        確認儲存
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 紀錄清單 -->
+        <div class="space-y-4 pb-12">
+            <div class="flex justify-between items-center px-2">
+                <h3 id="historyTitle" class="text-sm font-bold opacity-60">歷史交易紀錄</h3>
+                <button onclick="resetFilter()" id="resetBtn" class="hidden text-xs text-blue-400 underline">顯示全部</button>
+            </div>
+            <div id="historyList" class="space-y-3"></div>
+        </div>
+    </div>
+
+    <script>
+        let records = JSON.parse(localStorage.getItem('fund_data_v29') || '[]');
+        let currentYear = new Date().getFullYear();
+        let currentMonth = new Date().getMonth();
+        let selectedDate = null;
+        let selectedSplitMembers = [];
+        let editingId = null;
+        let chartScope = 'personal'; 
+        let chartType = 'expense';   
+        let mainChart = null;
+
+        const EXPENSE_CATS = ['飲食', '交通', '娛樂', '日常', '其他'];
+        const INCOME_CATS = ['薪資', '獎金', '投資', '零用', '其他'];
+
+        window.onload = () => {
+            const today = new Date();
+            document.getElementById('inputDate').value = today.toISOString().split('T')[0];
+            document.getElementById('inputTime').value = today.toTimeString().slice(0, 5);
+            toggleFormUI(); // 初始化分類選單
+            renderAll();
+        };
+
+        function renderAll() {
+            renderSummary();
+            renderCalendar();
+            renderHistory();
+            renderChart();
+            renderStatement();
+            localStorage.setItem('fund_data_v29', JSON.stringify(records));
+        }
+
+        // --- 過濾核心邏輯 ---
+        function getFilteredData() {
+            const period = document.getElementById('filterPeriod').value;
+            const userFilter = document.getElementById('filterUser').value;
+            let data = [...records];
+            const now = new Date();
+            const todayStr = now.toISOString().split('T')[0];
+
+            if (period === 'today') {
+                data = data.filter(r => r.date === todayStr);
+            } else if (period === 'week') {
+                const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                data = data.filter(r => new Date(r.date) >= weekAgo);
+            } else if (period === 'month') {
+                data = data.filter(r => {
+                    const rd = new Date(r.date);
+                    return rd.getMonth() === now.getMonth() && rd.getFullYear() === now.getFullYear();
+                });
+            }
+
+            if (userFilter !== 'all') {
+                data = data.filter(r => r.user === userFilter || (r.isJoint && r.splitWith.includes(userFilter)));
+            }
+            return data;
+        }
+
+        // --- 報表彙總 (邏輯修復版) ---
+        function renderStatement() {
+            const data = getFilteredData();
+            const userFilter = document.getElementById('filterUser').value;
+            const container = document.getElementById('statementContent');
+            let contentHtml = '';
+            let totalExp = 0;
+            let totalInc = 0;
+
+            // 支出統計
+            EXPENSE_CATS.forEach(cat => {
+                const amt = data.filter(r => r.type === 'expense' && r.category === cat).reduce((s, r) => {
+                    if (userFilter === 'all') return s + r.amount;
+                    if (r.isJoint) return s + (r.amount / (r.splitWith.length || 1));
+                    return r.user === userFilter ? s + r.amount : s;
+                }, 0);
+                totalExp += amt;
+                if (amt > 0) {
+                    contentHtml += `<div class="statement-row flex justify-between"><span class="opacity-60">支出：${cat}</span><span class="text-red-400 font-medium">-$${Math.round(amt).toLocaleString()}</span></div>`;
+                }
+            });
+
+            // 進帳統計 (同步分攤邏輯：若進帳也是共同的則按比例分)
+            INCOME_CATS.forEach(cat => {
+                const amt = data.filter(r => r.type === 'income' && r.category === cat).reduce((s, r) => {
+                    if (userFilter === 'all') return s + r.amount;
+                    if (r.isJoint) return s + (r.amount / (r.splitWith.length || 1));
+                    return r.user === userFilter ? s + r.amount : s;
+                }, 0);
+                totalInc += amt;
+                if (amt > 0) {
+                    contentHtml += `<div class="statement-row flex justify-between font-bold"><span class="text-green-400">進帳：${cat}</span><span class="text-green-400">+$${Math.round(amt).toLocaleString()}</span></div>`;
+                }
+            });
+
+            container.innerHTML = contentHtml || '<p class="text-center opacity-20 py-4 italic text-[10px]">選取區間無數據</p>';
+            const net = totalInc - totalExp;
+            const netEl = document.getElementById('statementNet');
+            netEl.innerText = `${net >= 0 ? '+' : ''}$${Math.round(net).toLocaleString()}`;
+            netEl.className = `font-bold text-xl ${net >= 0 ? 'text-green-400' : 'text-red-400'}`;
+        }
+
+        // --- 圖表邏輯 (分類修復) ---
+        function setChartScope(s) {
+            chartScope = s;
+            document.getElementById('btnScopePers').classList.toggle('active', s === 'personal');
+            document.getElementById('btnScopeJoint').classList.toggle('active', s === 'joint');
+            renderChart();
+        }
+
+        function setChartType(t) {
+            chartType = t;
+            document.getElementById('chartLabel').innerText = (t === 'expense' ? '支出分析' : '進帳分析');
+            document.getElementById('btnTypeExp').classList.toggle('active', t === 'expense');
+            document.getElementById('btnTypeInc').classList.toggle('active', t === 'income');
+            renderChart();
+        }
+
+        function renderChart() {
+            const data = getFilteredData();
+            const userFilter = document.getElementById('filterUser').value;
+            const categories = chartType === 'expense' ? EXPENSE_CATS : INCOME_CATS;
+            
+            let chartData = [];
+            if (chartScope === 'personal') {
+                const targetUser = userFilter === 'all' ? document.getElementById('inputUser').value : userFilter;
+                chartData = data.filter(r => r.type === chartType && (r.user === targetUser || (r.isJoint && r.splitWith.includes(targetUser))));
+            } else {
+                chartData = data.filter(r => r.isJoint && r.type === chartType);
+            }
+
+            let displayTotal = 0;
+            const values = categories.map(cat => {
+                let catSum = 0;
+                chartData.filter(r => r.category === cat).forEach(r => {
+                    if (chartScope === 'personal' && r.isJoint) {
+                        catSum += (r.amount / (r.splitWith.length || 1));
+                    } else {
+                        catSum += r.amount;
+                    }
+                });
+                displayTotal += catSum;
+                return catSum;
+            });
+
+            document.getElementById('chartCenterTotal').innerText = `$ ${Math.round(displayTotal).toLocaleString()}`;
+            const shareHint = document.getElementById('jointShareHint');
+            if (chartScope === 'joint' && displayTotal > 0) {
+                shareHint.innerText = `人均份額: $${Math.round(displayTotal / 2)}`; 
+                shareHint.classList.remove('hidden');
+            } else { shareHint.classList.add('hidden'); }
+
+            const ctx = document.getElementById('mainChart').getContext('2d');
+            if (mainChart) mainChart.destroy();
+            mainChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: categories,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: chartType === 'expense' ? ['#FF5E5E', '#4A90E2', '#50E3C2', '#F5A623', '#9B59B6'] : ['#50E3C2', '#4A90E2', '#F8E71C', '#BD10E0', '#9B59B6'],
+                        borderWidth: 0,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    cutout: '75%'
+                }
+            });
+        }
+
+        // --- UI 連動邏輯 ---
+        function toggleFormUI() {
+            const type = document.getElementById('inputType').value;
+            const catSelect = document.getElementById('inputCategory');
+            const cats = type === 'expense' ? EXPENSE_CATS : INCOME_CATS;
+            const icons = type === 'expense' ? ['🍔', '🚗', '🎮', '🏠', '✨'] : ['💰', '🧧', '📈', '🍬', '✨'];
+            
+            catSelect.innerHTML = cats.map((c, i) => `<option value="${c}">${icons[i]} ${c}</option>`).join('');
+            // 進帳也可以選擇共同
+            document.getElementById('jointGroup').style.display = 'block';
+        }
+
+        function updateSplitUI() {
+            document.getElementById('splitUI').classList.toggle('hidden', !document.getElementById('isJoint').checked);
+        }
+
+        function toggleSplit(name, el) {
+            if (selectedSplitMembers.includes(name)) {
+                selectedSplitMembers = selectedSplitMembers.filter(n => n !== name);
+                el.classList.remove('bg-blue-500', 'border-blue-500');
+            } else {
+                selectedSplitMembers.push(name);
+                el.classList.add('bg-blue-500', 'border-blue-500');
+            }
+        }
+
+        function saveRecord() {
+            const amt = parseFloat(document.getElementById('inputAmount').value);
+            if (!amt) return;
+            const isJoint = document.getElementById('isJoint').checked;
+            const data = {
+                id: editingId || Date.now(),
+                user: document.getElementById('inputUser').value,
+                type: document.getElementById('inputType').value,
+                title: document.getElementById('inputTitle').value || (document.getElementById('inputType').value === 'income' ? '進帳項目' : '支出項目'),
+                category: document.getElementById('inputCategory').value,
+                amount: amt,
+                date: document.getElementById('inputDate').value,
+                time: document.getElementById('inputTime').value,
+                isJoint: isJoint,
+                splitWith: isJoint ? [...selectedSplitMembers] : []
+            };
+
+            if (editingId) {
+                const idx = records.findIndex(r => r.id === editingId);
+                records[idx] = data;
+                editingId = null;
+                document.getElementById('saveBtn').innerText = "確認儲存";
+                document.getElementById('formTitle').innerText = "新增交易";
+                document.getElementById('editIndicator').classList.add('hidden');
+                document.getElementById('cancelEditBtn').classList.add('hidden');
+            } else { records.push(data); }
+
+            document.getElementById('inputAmount').value = "";
+            document.getElementById('inputTitle').value = "";
+            selectedSplitMembers = [];
+            document.querySelectorAll('#splitTags div').forEach(d => d.classList.remove('bg-blue-500', 'border-blue-500'));
+            document.getElementById('isJoint').checked = false;
+            updateSplitUI();
+            renderAll();
+        }
+
+        function editRecord(id) {
+            const r = records.find(x => x.id === id);
+            if (!r) return;
+            editingId = id;
+            document.getElementById('saveBtn').innerText = "更新紀錄數據";
+            document.getElementById('formTitle').innerText = "正在編輯紀錄";
+            document.getElementById('editIndicator').classList.remove('hidden');
+            document.getElementById('cancelEditBtn').classList.remove('hidden');
+            
+            document.getElementById('inputUser').value = r.user;
+            document.getElementById('inputType').value = r.type;
+            toggleFormUI(); // 先換分類清單
+            document.getElementById('inputCategory').value = r.category;
+            document.getElementById('inputAmount').value = r.amount;
+            document.getElementById('inputTitle').value = r.title;
+            document.getElementById('inputDate').value = r.date;
+            document.getElementById('inputTime').value = r.time;
+            document.getElementById('isJoint').checked = r.isJoint;
+            
+            updateSplitUI();
+            selectedSplitMembers = [...r.splitWith];
+            document.querySelectorAll('#splitTags div').forEach(d => {
+                const name = d.innerText.replace('👤 ', '');
+                d.classList.toggle('bg-blue-500', selectedSplitMembers.includes(name));
+                d.classList.toggle('border-blue-500', selectedSplitMembers.includes(name));
+            });
+            window.scrollTo({ top: document.getElementById('formAnchor').offsetTop - 20, behavior: 'smooth' });
+        }
+
+        function deleteRecord(id) {
+            if (confirm('確定要徹底刪除這筆交易嗎？')) { records = records.filter(r => r.id !== id); renderAll(); }
+        }
+
+        function cancelEdit() {
+            editingId = null;
+            document.getElementById('saveBtn').innerText = "確認儲存";
+            document.getElementById('formTitle').innerText = "新增交易";
+            document.getElementById('editIndicator').classList.add('hidden');
+            document.getElementById('cancelEditBtn').classList.add('hidden');
+            document.getElementById('inputAmount').value = "";
+            document.getElementById('inputTitle').value = "";
+            renderAll();
+        }
+
+        function resetFilter() { selectedDate = null; renderAll(); }
+
+        function renderSummary() {
+            const inc = records.reduce((s, r) => r.type === 'income' ? s + r.amount : s, 0);
+            const exp = records.reduce((s, r) => r.type === 'expense' ? s + r.amount : s, 0);
+            document.getElementById('totalBalance').innerText = `$ ${(inc - exp).toLocaleString()}`;
+        }
+
+        function renderCalendar() {
+            const grid = document.getElementById('calendarGrid');
+            grid.innerHTML = '<span class="opacity-20 text-[10px]">SUN</span><span class="opacity-20 text-[10px]">MON</span><span class="opacity-20 text-[10px]">TUE</span><span class="opacity-20 text-[10px]">WED</span><span class="opacity-20 text-[10px]">THU</span><span class="opacity-20 text-[10px]">FRI</span><span class="opacity-20 text-[10px]">SAT</span>';
+            document.getElementById('calendarTitle').innerText = `${currentYear}年 ${currentMonth + 1}月`;
+            const first = new Date(currentYear, currentMonth, 1).getDay();
+            const days = new Date(currentYear, currentMonth + 1, 0).getDate();
+            for (let i = 0; i < first; i++) grid.innerHTML += '<div></div>';
+            for (let d = 1; d <= days; d++) {
+                const dStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                const hasData = records.some(r => r.date === dStr);
+                const dayEl = document.createElement('div');
+                dayEl.className = `calendar-day ${hasData ? 'has-data' : ''} ${selectedDate === dStr ? 'selected' : ''}`;
+                dayEl.innerText = d;
+                dayEl.onclick = () => { selectedDate = selectedDate === dStr ? null : dStr; renderAll(); };
+                grid.appendChild(dayEl);
+            }
+        }
+
+        function changeMonth(s) {
+            currentMonth += s;
+            if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+            if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+            renderCalendar();
+        }
+
+        function renderHistory() {
+            const list = document.getElementById('historyList');
+            list.innerHTML = '';
+            let filtered = selectedDate ? records.filter(r => r.date === selectedDate) : getFilteredData().reverse().slice(0, 15);
+            
+            if (filtered.length === 0) {
+                list.innerHTML = '<div class="text-center py-10 opacity-20 text-xs italic">暫無歷史交易數據</div>';
+                return;
+            }
+
+            filtered.forEach(r => {
+                const card = document.createElement('div');
+                card.className = "glass-card p-4 flex justify-between items-center transition-all hover:bg-white/[0.05]";
+                card.innerHTML = `
+                    <div class="flex-1">
+                        <p class="text-sm font-bold flex items-center text-white/90">${r.title} ${r.isJoint ? '<span class="ml-2 text-[8px] bg-blue-500/20 text-blue-300 px-1.5 rounded-full border border-blue-500/30">共同</span>' : ''}</p>
+                        <p class="text-[9px] opacity-30 mt-0.5">${r.date} • ${r.category} • ${r.user}</p>
+                    </div>
+                    <div class="text-right flex flex-col items-end gap-1">
+                        <p class="font-bold ${r.type === 'income' ? 'text-green-400' : 'text-red-400'} text-sm">
+                            ${r.type === 'income' ? '+' : '-'}$${r.amount.toLocaleString()}
+                        </p>
+                        <div class="flex gap-3">
+                            <button onclick="editRecord(${r.id})" class="text-[10px] text-blue-400 font-medium">編輯</button>
+                            <button onclick="deleteRecord(${r.id})" class="text-[10px] text-red-500/60">刪除</button>
+                        </div>
+                    </div>`;
+                list.appendChild(card);
+            });
+        }
+    </script>
+</body>
+</html>
